@@ -1,0 +1,46 @@
+{{define "metric_detail.html"}}
+<section class="card" id="metric-detail-section">
+  <div class="card-header">
+    <h2>Cardinality of a Metric</h2>
+  </div>
+  <form class="toolbar" method="get" action="/"
+        hx-get="/partials/metric-detail"
+        hx-target="#metric-detail-section"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-indicator="#metric-detail-spinner">
+    <input type="search" name="detail_metric" placeholder="Metric name, e.g. up" value="{{.DetailMetric}}" autocomplete="off">
+    <button type="submit" class="btn">Look up</button>
+    <span id="metric-detail-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
+  </form>
+  {{if .DetailMetric}}
+    {{if .MetricDetailErr}}
+    <p class="error">{{.MetricDetailErr}}</p>
+    {{else if and (eq .MetricDetail.SeriesCount 0) (not .MetricDetail.Metadata) (not .MetricDetail.Labels)}}
+    <p class="empty-state">No series found for <code>{{.DetailMetric}}</code>.</p>
+    {{else}}
+    <div class="metric-detail-grid">
+      <table>
+        <tbody>
+          <tr><th>Series Count</th><td class="num">{{.MetricDetail.SeriesCount}}</td></tr>
+          {{range .MetricDetail.Metadata}}
+          <tr><th>Type</th><td>{{.Type}}</td></tr>
+          {{if .Unit}}<tr><th>Unit</th><td>{{.Unit}}</td></tr>{{end}}
+          {{if .Help}}<tr><th>Help</th><td>{{.Help}}</td></tr>{{end}}
+          {{end}}
+        </tbody>
+      </table>
+      <table>
+        <thead><tr><th>Label</th><th class="num">Distinct Values</th></tr></thead>
+        <tbody>
+          {{range .MetricDetail.Labels}}
+          <tr><td><code>{{.Name}}</code></td><td class="num">{{.Count}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{if not .MetricDetail.Labels}}<p class="empty-state">No labels besides <code>__name__</code>.</p>{{end}}
+    {{end}}
+  {{end}}
+</section>
+{{end}}

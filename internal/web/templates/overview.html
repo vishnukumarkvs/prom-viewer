@@ -1,0 +1,96 @@
+{{define "overview.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>prom-viewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="brand">prom-viewer</span>
+      <span class="topbar-meta">{{if .Build.Version}}{{.Build.Version}} &middot; {{end}}{{.Runtime.Hostname}}</span>
+    </div>
+  </header>
+
+  <main>
+    {{if .Err}}
+    <p class="error banner">Error loading TSDB status: {{.Err}}</p>
+    {{end}}
+
+    <div class="grid">
+      <section class="card">
+        <div class="card-header"><h2>TSDB Head</h2></div>
+        <table>
+          <tbody>
+            <tr><th>Number of Series</th><td class="num">{{.Head.NumSeries}}</td></tr>
+            <tr><th>Number of Chunks</th><td class="num">{{.Head.ChunkCount}}</td></tr>
+            <tr><th>Number of Label Pairs</th><td class="num">{{.Head.NumLabelPairs}}</td></tr>
+            <tr><th>Min Time</th><td>{{unixMillis .Head.MinTime}}</td></tr>
+            <tr><th>Max Time</th><td>{{unixMillis .Head.MaxTime}}</td></tr>
+            <tr><th>Persisted Blocks</th><td class="num">{{.BlockCount}}</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <div class="card-header"><h2>WAL</h2></div>
+        <table>
+          <tbody>
+            <tr><th>Size</th><td class="num">{{humanBytes .WALInfo.SizeBytes}}</td></tr>
+            <tr><th>Current Segment</th><td class="num">{{.WALInfo.CurrentSegment}}</td></tr>
+          </tbody>
+        </table>
+        {{if .WALReplayInProgress}}
+        <p class="wal-replaying">In progress: segment {{.WALReplay.Current}} of {{.WALReplay.Max}} ({{.WALReplayPercent}}%)</p>
+        <progress class="wal-progress" value="{{.WALReplayPercent}}" max="100"></progress>
+        {{else}}
+        <p class="badge-ok">&check; Up to date</p>
+        {{end}}
+      </section>
+
+      <section class="card">
+        <div class="card-header"><h2>Runtime</h2></div>
+        <table>
+          <tbody>
+            <tr><th>Start Time</th><td>{{.Runtime.StartTime}}</td></tr>
+            <tr><th>Server Time</th><td>{{.Runtime.ServerTime}}</td></tr>
+            <tr><th>CWD</th><td>{{.Runtime.CWD}}</td></tr>
+            <tr><th>Reload Config Success</th><td>{{.Runtime.ReloadConfigSuccess}}</td></tr>
+            <tr><th>Last Config Time</th><td>{{.Runtime.LastConfigTime}}</td></tr>
+            <tr><th>Corruption Count</th><td class="num">{{.Runtime.CorruptionCount}}</td></tr>
+            <tr><th>Goroutines</th><td class="num">{{.Runtime.GoroutineCount}}</td></tr>
+            <tr><th>GOMAXPROCS</th><td class="num">{{.Runtime.GOMAXPROCS}}</td></tr>
+            <tr><th>GOMEMLIMIT</th><td class="num">{{.Runtime.GOMEMLIMIT}}</td></tr>
+            <tr><th>GOGC</th><td>{{.Runtime.GOGC}}</td></tr>
+            <tr><th>Storage Retention</th><td>{{.Runtime.StorageRetention}}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    {{template "cardinality.html" .}}
+    {{template "metric_detail.html" .}}
+
+    <section class="card">
+      <details>
+        <summary>Flags ({{len .Flags}})</summary>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Value</th></tr></thead>
+            <tbody>
+              {{range .Flags}}
+              <tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

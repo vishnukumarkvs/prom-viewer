@@ -1,0 +1,39 @@
+{{define "cardinality.html"}}
+<section class="card" id="cardinality-section">
+  <div class="card-header">
+    <h2>{{if .MetricSearch}}Metric names matching &quot;{{.MetricSearch}}&quot;{{else}}Top {{.Limit}} series count by metric name{{end}}</h2>
+  </div>
+  <form class="toolbar" method="get" action="/"
+        hx-get="/partials/cardinality"
+        hx-target="#cardinality-section"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-trigger="submit, keyup changed delay:400ms from:input[name='metric']">
+    <input type="search" name="metric" placeholder="Search metric names&hellip;" value="{{.MetricSearch}}" autocomplete="off">
+    <label class="limit-field">Limit
+      <input type="number" name="limit" min="1" max="10000" value="{{.Limit}}" title="Number of rows to show (ignored while searching)">
+    </label>
+    <button type="submit" class="btn">Apply</button>
+    {{if .MetricSearch}}
+    <a class="link-muted" href="/?limit={{.Limit}}"
+       hx-get="/partials/cardinality?limit={{.Limit}}"
+       hx-target="#cardinality-section"
+       hx-swap="outerHTML"
+       hx-push-url="true">Clear</a>
+    {{end}}
+  </form>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Name</th><th class="num">Count</th></tr></thead>
+      <tbody>
+        {{range .Cardinality.SeriesCountByMetricName}}
+        <tr><td><code>{{.Name}}</code></td><td class="num">{{.Value}}</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if and .MetricSearch (not .Cardinality.SeriesCountByMetricName)}}
+  <p class="empty-state">No metric names match &quot;{{.MetricSearch}}&quot;.</p>
+  {{end}}
+</section>
+{{end}}
