@@ -72,6 +72,35 @@
       </section>
     </div>
 
+    <section class="card">
+      <div class="card-header"><h2>Resource Usage — Last 1h</h2><span class="hint">rate(process_cpu_seconds_total[2m]) &amp; process_resident_memory_bytes</span></div>
+      {{if .Resource.Err}}<p class="error">Error loading resource graphs: {{.Resource.Err}}</p>{{end}}
+      <div class="resource-grid">
+        <div class="resource-panel">
+          <div class="resource-title">CPU <span class="resource-current">{{if not .Resource.CPU.Empty}}{{humanCPU .Resource.CPU.Current}}{{else}}n/a{{end}}</span></div>
+          {{if .Resource.CPU.Empty}}<p class="empty-state">No CPU data (need &gt;2m uptime)</p>
+          {{else}}
+          <svg viewBox="0 0 600 80" class="sparkline" preserveAspectRatio="none" role="img" aria-label="CPU last hour">
+            <path d="{{.Resource.CPU.AreaPath}}" class="sparkline-area cpu-area"></path>
+            <path d="{{.Resource.CPU.Path}}" class="sparkline-line cpu-line" fill="none"></path>
+          </svg>
+          <div class="sparkline-meta"><span>{{printf "%.3f" .Resource.CPU.Min}} cores</span><span>1h</span><span>{{printf "%.3f" .Resource.CPU.Max}} cores</span></div>
+          {{end}}
+        </div>
+        <div class="resource-panel">
+          <div class="resource-title">Memory (RSS) <span class="resource-current">{{if not .Resource.Mem.Empty}}{{humanBytesF .Resource.Mem.Current}}{{else}}n/a{{end}}</span></div>
+          {{if .Resource.Mem.Empty}}<p class="empty-state">No memory data</p>
+          {{else}}
+          <svg viewBox="0 0 600 80" class="sparkline" preserveAspectRatio="none" role="img" aria-label="Memory last hour">
+            <path d="{{.Resource.Mem.AreaPath}}" class="sparkline-area mem-area"></path>
+            <path d="{{.Resource.Mem.Path}}" class="sparkline-line mem-line" fill="none"></path>
+          </svg>
+          <div class="sparkline-meta"><span>{{humanBytesF .Resource.Mem.Min}}</span><span>1h</span><span>{{humanBytesF .Resource.Mem.Max}}</span></div>
+          {{end}}
+        </div>
+      </div>
+    </section>
+
     {{template "cardinality.html" .}}
     {{template "metric_detail.html" .}}
 

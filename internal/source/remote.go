@@ -419,4 +419,56 @@ func (s *RemoteSource) MetricDetail(ctx context.Context, metricName string) (Met
 	return detail, nil
 }
 
+// QueryRange implements Source.
+func (s *RemoteSource) QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]SamplePoint, error) {
+	q := url.Values{
+		"query": {query},
+		"start": {start.Format(time.RFC3339Nano)},
+		"end":   {end.Format(time.RFC3339Nano)},
+		"step":  {step.String()},
+	}
+	var resp struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Values [][]any           `json:"values"`
+		} `json:"result"`
+	}
+	if err := s.get(ctx, "/query_range", q, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Result) == 0 {
+		return nil, nil
+	}
+	raw := resp.Result[0].Values
+	out := make([]SamplePoint, 0, len(raw))
+	for _, v := range raw {
+		if len(v) != 2 {
+			continue
+		}
+		var ts float64
+		switch t := v[0].(type) {
+		case float64:
+			ts = t
+		case json.Number:
+			f, _ := t.Float64()
+			ts = f
+		default:
+			continue
+		}
+		sVal, ok := v[1].(string)
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(sVal, 64)
+		if err != nil {
+			continue
+		}
+		sec := int64(ts)
+		nsec := int64((ts - float64(sec)) * 1e9)
+		out = append(out, SamplePoint{Timestamp: time.Unix(sec, nsec).UTC(), Value: f})
+	}
+	return out, nil
+}
+
 var _ Source = (*RemoteSource)(nil)

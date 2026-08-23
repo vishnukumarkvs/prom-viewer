@@ -54,6 +54,13 @@ func NewHandler(src source.Source, logger *slog.Logger) (*Handler, error) {
 			return time.UnixMilli(ms).UTC().Format(time.RFC3339)
 		},
 		"humanBytes": humanBytes,
+		"humanBytesF": func(v float64) string { return humanBytes(int64(v)) },
+		"humanCPU": func(v float64) string {
+			if v < 0 {
+				return "n/a"
+			}
+			return fmt.Sprintf("%.2f cores (%.0f%%)", v, v*100)
+		},
 	}).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -108,8 +115,28 @@ type overviewData struct {
 	WALReplayInProgress bool
 	WALReplayPercent    int
 
+	Resource ResourceData
+
 	cardinalityData
 	metricDetailData
+}
+
+// ResourceData holds 1h CPU/memory graphs.
+type ResourceData struct {
+	CPU GraphData
+	Mem GraphData
+	Err string
+}
+
+// GraphData is a single sparkline.
+type GraphData struct {
+	Points  []source.SamplePoint
+	Path    string // SVG path
+	AreaPath string // filled area path
+	Min     float64
+	Max     float64
+	Current float64
+	Empty   bool
 }
 
 // cardinalityData backs the "top N / search metric names" section. It's
@@ -223,6 +250,78 @@ func (h *Handler) metricDetailPartial(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "metric_detail.html", h.fetchMetricDetail(ctx, r))
 }
 
+func buildGraph(points []source.SamplePoint) GraphData {
+	if len(points) == 0 {
+		return GraphData{Empty: true}
+	}
+	min, max := points[0].Value, points[0].Value
+	for _, p := range points[1:] {
+		if p.Value < min {
+			min = p.Value
+		}
+		if p.Value > max {
+			max = p.Value
+		}
+	}
+	// pad flat line so SVG has height
+	if min == max {
+		min -= 1
+		max += 1
+		if min < 0 {
+			min = 0
+		}
+	}
+	const w, h = 600.0, 80.0
+	const pad = 2.0
+	n := len(points)
+	var sb strings.Builder
+	var area strings.Builder
+	for i, p := range points {
+		x := float64(i) / float64(n-1) * w
+		norm := (p.Value - min) / (max - min)
+		y := h - norm*(h-pad*2) - pad
+		if i == 0 {
+			sb.WriteString(fmt.Sprintf("M %.2f %.2f", x, y))
+			area.WriteString(fmt.Sprintf("M %.2f %.2f L %.2f %.2f", x, h-pad, x, y))
+		} else {
+			sb.WriteString(fmt.Sprintf(" L %.2f %.2f", x, y))
+			area.WriteString(fmt.Sprintf(" L %.2f %.2f", x, y))
+		}
+		if i == n-1 {
+			area.WriteString(fmt.Sprintf(" L %.2f %.2f Z", w, h-pad))
+		}
+	}
+	return GraphData{
+		Points:   points,
+		Path:     sb.String(),
+		AreaPath: area.String(),
+		Min:      min,
+		Max:      max,
+		Current:  points[len(points)-1].Value,
+	}
+}
+
+func (h *Handler) fetchResource(ctx context.Context) ResourceData {
+	end := time.Now()
+	start := end.Add(-1 * time.Hour)
+	step := 30 * time.Second
+	cpuQ := "rate(process_cpu_seconds_total[2m])"
+	memQ := "process_resident_memory_bytes"
+	ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cpu, err1 := h.src.QueryRange(ctx2, cpuQ, start, end, step)
+	if err1 != nil {
+		h.logger.Error("cpu query_range", "err", err1)
+		return ResourceData{Err: err1.Error()}
+	}
+	mem, err2 := h.src.QueryRange(ctx2, memQ, start, end, step)
+	if err2 != nil {
+		h.logger.Error("mem query_range", "err", err2)
+		return ResourceData{CPU: buildGraph(cpu), Err: err2.Error()}
+	}
+	return ResourceData{CPU: buildGraph(cpu), Mem: buildGraph(mem)}
+}
+
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
@@ -235,6 +334,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data.Head = v
 	}
+	data.Resource = h.fetchResource(ctx)
 	data.cardinalityData = h.fetchCardinality(ctx, r)
 	data.metricDetailData = h.fetchMetricDetail(ctx, r)
 	if v, err := h.src.BuildInfo(ctx); err != nil {

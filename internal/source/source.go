@@ -3,7 +3,10 @@
 // layer can stay agnostic of where the data actually comes from.
 package source
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Stat is a single named counter, e.g. a metric name and its series count.
 type Stat struct {
@@ -118,6 +121,12 @@ type MetricDetail struct {
 	Labels []LabelCardinality
 }
 
+// SamplePoint is a single timestamp/value pair from a Prometheus range query.
+type SamplePoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
 // Source is implemented by each backend (remote HTTP API, local TSDB read)
 // that prom-viewer can pull operational data from.
 type Source interface {
@@ -146,4 +155,6 @@ type Source interface {
 	// named metric. A metric with no matching series returns a zero-value
 	// (empty) MetricDetail rather than an error.
 	MetricDetail(ctx context.Context, metricName string) (MetricDetail, error)
+	// QueryRange runs a PromQL range query and returns the first series' samples.
+	QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]SamplePoint, error)
 }
