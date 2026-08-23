@@ -61,6 +61,15 @@ func NewHandler(src source.Source, logger *slog.Logger) (*Handler, error) {
 			}
 			return fmt.Sprintf("%.2f cores (%.0f%%)", v, v*100)
 		},
+		"durationMs": func(v float64) string {
+			if v < 0.001 {
+				return fmt.Sprintf("%.2f µs", v*1e6)
+			}
+			if v < 1 {
+				return fmt.Sprintf("%.2f ms", v*1000)
+			}
+			return fmt.Sprintf("%.3f s", v)
+		},
 	}).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -95,6 +104,8 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	// is fully functional with JS disabled too.
 	mux.HandleFunc("GET /partials/cardinality", h.cardinalityPartial)
 	mux.HandleFunc("GET /partials/metric-detail", h.metricDetailPartial)
+	mux.HandleFunc("GET /partials/rules", h.rulesPartial)
+	mux.HandleFunc("GET /partials/rule-detail", h.ruleDetailPartial)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 }
 
@@ -119,6 +130,8 @@ type overviewData struct {
 
 	cardinalityData
 	metricDetailData
+	rulesData
+	ruleDetailData
 }
 
 // ResourceData holds 1h CPU/memory/series graphs.
@@ -160,6 +173,20 @@ type metricDetailData struct {
 type flagRow struct {
 	Name  string
 	Value string
+}
+
+// rulesData backs the recording rules table, mirroring cardinalityData pattern.
+type rulesData struct {
+	RuleGroups []source.RuleGroup
+	RulesErr   string
+	RuleSearch string
+}
+
+// ruleDetailData backs the rule-group lookup, mirroring metricDetailData.
+type ruleDetailData struct {
+	RuleGroupSearch string
+	RuleGroup       *source.RuleGroup
+	RuleGroupErr    string
 }
 
 // filterStats returns the entries in stats whose Name contains query
@@ -228,6 +255,61 @@ func (h *Handler) fetchMetricDetail(ctx context.Context, r *http.Request) metric
 	return data
 }
 
+func (h *Handler) fetchRules(ctx context.Context, r *http.Request) rulesData {
+	var data rulesData
+	data.RuleSearch = strings.TrimSpace(r.URL.Query().Get("rule_search"))
+	groups, err := h.src.RuleGroups(ctx)
+	if err != nil {
+		h.logger.Error("rules", "err", err)
+		data.RulesErr = err.Error()
+		return data
+	}
+	if data.RuleSearch != "" {
+		filtered := make([]source.RuleGroup, 0, len(groups))
+		q := strings.ToLower(data.RuleSearch)
+		for _, g := range groups {
+			if strings.Contains(strings.ToLower(g.Name), q) {
+				filtered = append(filtered, g)
+			}
+		}
+		groups = filtered
+	}
+	data.RuleGroups = groups
+	return data
+}
+
+func (h *Handler) fetchRuleDetail(ctx context.Context, r *http.Request) ruleDetailData {
+	var data ruleDetailData
+	data.RuleGroupSearch = strings.TrimSpace(r.URL.Query().Get("rule_group"))
+	if data.RuleGroupSearch == "" {
+		return data
+	}
+	groups, err := h.src.RuleGroups(ctx)
+	if err != nil {
+		h.logger.Error("rule group detail", "err", err)
+		data.RuleGroupErr = err.Error()
+		return data
+	}
+	q := strings.ToLower(data.RuleGroupSearch)
+	for _, g := range groups {
+		if strings.ToLower(g.Name) == q {
+			cpy := g
+			data.RuleGroup = &cpy
+			return data
+		}
+	}
+	// also allow partial match -> first containing
+	for _, g := range groups {
+		if strings.Contains(strings.ToLower(g.Name), q) {
+			cpy := g
+			data.RuleGroup = &cpy
+			return data
+		}
+	}
+	// not found => empty but not error, template shows empty-state
+	return data
+}
+
 // pushURL tells an htmx partial response to make the browser address bar
 // show the equivalent full-page "/" URL instead of the partial's own
 // "/partials/..." path, so the current search/lookup stays bookmarkable.
@@ -255,6 +337,20 @@ func (h *Handler) metricDetailPartial(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	pushURL(w, r)
 	h.render(w, "metric_detail.html", h.fetchMetricDetail(ctx, r))
+}
+
+func (h *Handler) rulesPartial(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	pushURL(w, r)
+	h.render(w, "rules.html", h.fetchRules(ctx, r))
+}
+
+func (h *Handler) ruleDetailPartial(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	pushURL(w, r)
+	h.render(w, "rule_detail.html", h.fetchRuleDetail(ctx, r))
 }
 
 func buildGraph(points []source.SamplePoint) GraphData {
@@ -350,6 +446,8 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	data.Resource = h.fetchResource(ctx)
 	data.cardinalityData = h.fetchCardinality(ctx, r)
 	data.metricDetailData = h.fetchMetricDetail(ctx, r)
+	data.rulesData = h.fetchRules(ctx, r)
+	data.ruleDetailData = h.fetchRuleDetail(ctx, r)
 	if v, err := h.src.BuildInfo(ctx); err != nil {
 		h.logger.Error("build info", "err", err)
 	} else {

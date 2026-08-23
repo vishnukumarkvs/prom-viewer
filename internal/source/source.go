@@ -127,6 +127,27 @@ type SamplePoint struct {
 	Value     float64
 }
 
+// RecordingRule is a single recording rule within a group.
+type RecordingRule struct {
+	Name           string
+	Query          string
+	Labels         map[string]string
+	Health         string
+	EvaluationTime float64
+	LastEvaluation time.Time
+}
+
+// RuleGroup is a Prometheus rule group, filtered to recording rules for UI.
+type RuleGroup struct {
+	Name            string
+	File            string
+	Interval        float64
+	EvaluationTime  float64
+	LastEvaluation  time.Time
+	RecordingRules  []RecordingRule
+	TotalRules      int // all rules in group (for reference)
+}
+
 // Source is implemented by each backend (remote HTTP API, local TSDB read)
 // that prom-viewer can pull operational data from.
 type Source interface {
@@ -159,4 +180,6 @@ type Source interface {
 	QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]SamplePoint, error)
 	// UniqueMetricCount returns the number of distinct metric names.
 	UniqueMetricCount(ctx context.Context) (int, error)
+	// RuleGroups returns recording-rule groups (only groups containing at least one recording rule).
+	RuleGroups(ctx context.Context) ([]RuleGroup, error)
 }

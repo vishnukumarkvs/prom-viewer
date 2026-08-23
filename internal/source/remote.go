@@ -480,4 +480,65 @@ func (s *RemoteSource) UniqueMetricCount(ctx context.Context) (int, error) {
 	return len(names), nil
 }
 
+// RuleGroups implements Source. Filters to groups containing recording rules and sorts by evaluationTime desc.
+func (s *RemoteSource) RuleGroups(ctx context.Context) ([]RuleGroup, error) {
+	var resp struct {
+		Groups []struct {
+			Name           string  `json:"name"`
+			File           string  `json:"file"`
+			Interval       float64 `json:"interval"`
+			EvaluationTime float64 `json:"evaluationTime"`
+			LastEvaluation time.Time `json:"lastEvaluation"`
+			Rules []struct {
+				Name           string            `json:"name"`
+				Query          string            `json:"query"`
+				Expr           string            `json:"expr"`
+				Labels         map[string]string `json:"labels"`
+				Health         string            `json:"health"`
+				Type           string            `json:"type"`
+				EvaluationTime float64           `json:"evaluationTime"`
+				LastEvaluation time.Time         `json:"lastEvaluation"`
+			} `json:"rules"`
+		} `json:"groups"`
+	}
+	if err := s.get(ctx, "/rules", nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]RuleGroup, 0, len(resp.Groups))
+	for _, g := range resp.Groups {
+		rec := make([]RecordingRule, 0)
+		for _, r := range g.Rules {
+			if r.Type != "recording" {
+				continue
+			}
+			q := r.Query
+			if q == "" {
+				q = r.Expr
+			}
+			rec = append(rec, RecordingRule{
+				Name:           r.Name,
+				Query:          q,
+				Labels:         r.Labels,
+				Health:         r.Health,
+				EvaluationTime: r.EvaluationTime,
+				LastEvaluation: r.LastEvaluation,
+			})
+		}
+		if len(rec) == 0 {
+			continue
+		}
+		out = append(out, RuleGroup{
+			Name:           g.Name,
+			File:           g.File,
+			Interval:       g.Interval,
+			EvaluationTime: g.EvaluationTime,
+			LastEvaluation: g.LastEvaluation,
+			RecordingRules: rec,
+			TotalRules:     len(g.Rules),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EvaluationTime > out[j].EvaluationTime })
+	return out, nil
+}
+
 var _ Source = (*RemoteSource)(nil)

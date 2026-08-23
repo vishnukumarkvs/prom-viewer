@@ -1,0 +1,49 @@
+{{define "rule_detail.html"}}
+<section class="card" id="rule-detail-section">
+  <div class="card-header">
+    <h2>Rule Group Detail</h2>
+  </div>
+  <form class="toolbar" method="get" action="/"
+        hx-get="/partials/rule-detail"
+        hx-target="#rule-detail-section"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-indicator="#rule-detail-spinner">
+    <input type="search" name="rule_group" placeholder="Group name, e.g. my-group" value="{{.RuleGroupSearch}}" autocomplete="off">
+    <button type="submit" class="btn">Look up</button>
+    <span id="rule-detail-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
+  </form>
+  {{if .RuleGroupSearch}}
+    {{if .RuleGroupErr}}
+    <p class="error">{{.RuleGroupErr}}</p>
+    {{else if not .RuleGroup}}
+    <p class="empty-state">No recording rule group found for "<code>{{.RuleGroupSearch}}</code>".</p>
+    {{else}}
+    <div style="margin-top:0.6rem">
+      <table>
+        <tbody>
+          <tr><th>Group</th><td>{{.RuleGroup.Name}}</td></tr>
+          <tr><th>File</th><td class="mono">{{.RuleGroup.File}}</td></tr>
+          <tr><th>Interval</th><td>{{printf "%.0f" .RuleGroup.Interval}}s</td></tr>
+          <tr><th>Evaluation Time</th><td>{{durationMs .RuleGroup.EvaluationTime}}</td></tr>
+          <tr><th>Last Evaluation</th><td class="mono">{{.RuleGroup.LastEvaluation.Format "2006-01-02T15:04:05Z"}}</td></tr>
+          <tr><th>Recording Rules</th><td class="num">{{len .RuleGroup.RecordingRules}} / {{.RuleGroup.TotalRules}} total</td></tr>
+        </tbody>
+      </table>
+      {{if .RuleGroup.RecordingRules}}
+      <div class="table-scroll" style="margin-top:0.8rem">
+        <table>
+          <thead><tr><th>Rule</th><th>Query</th><th class="num">Eval Time</th><th>Health</th></tr></thead>
+          <tbody>
+            {{range .RuleGroup.RecordingRules}}
+            <tr><td>{{.Name}}</td><td class="mono" style="max-width:28rem;word-break:break-all">{{.Query}}</td><td class="num">{{durationMs .EvaluationTime}}</td><td>{{.Health}}</td></tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{end}}
+</section>
+{{end}}

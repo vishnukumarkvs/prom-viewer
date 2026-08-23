@@ -1,0 +1,41 @@
+{{define "rules.html"}}
+<section class="card" id="rules-section">
+  <div class="card-header">
+    <h2>Recording Rules by Group</h2>
+    {{if .RuleGroups}}<span class="hint">{{len .RuleGroups}} groups</span>{{end}}
+  </div>
+  <form class="toolbar" method="get" action="/"
+        hx-get="/partials/rules"
+        hx-target="#rules-section"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-trigger="submit, keyup changed delay:400ms from:input[name='rule_search']">
+    <input type="search" name="rule_search" placeholder="Filter rule groups…" value="{{.RuleSearch}}" autocomplete="off">
+    <button type="submit" class="btn">Filter</button>
+    {{if .RuleSearch}}
+    <a class="link-muted" href="/?rule_search="
+       hx-get="/partials/rules"
+       hx-target="#rules-section"
+       hx-swap="outerHTML"
+       hx-push-url="true">Clear</a>
+    {{end}}
+  </form>
+  {{if .RulesErr}}
+  <p class="error">{{.RulesErr}}</p>
+  {{else if not .RuleGroups}}
+  <p class="empty-state">No recording rule groups found {{if .RuleSearch}}for "{{.RuleSearch}}"{{end}}. <br><span style="font-size:0.82em">Prometheus has no recording rules configured (or only alerting rules).</span></p>
+  {{else}}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Group</th><th class="num">Recording Rules</th><th class="num">Interval</th><th class="num">Evaluation Time</th></tr></thead>
+      <tbody>
+        {{range .RuleGroups}}
+        <tr><td>{{.Name}}</td><td class="num">{{len .RecordingRules}}</td><td class="num">{{printf "%.0fs" .Interval}}</td><td class="num">{{durationMs .EvaluationTime}}</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-faint)">Sorted by evaluation time (slowest first). Source: <code>/api/v1/rules</code></div>
+  {{end}}
+</section>
+{{end}}
