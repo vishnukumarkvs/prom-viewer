@@ -471,4 +471,13 @@ func (s *RemoteSource) QueryRange(ctx context.Context, query string, start, end 
 	return out, nil
 }
 
+// UniqueMetricCount implements Source.
+func (s *RemoteSource) UniqueMetricCount(ctx context.Context) (int, error) {
+	var names []string
+	if err := s.get(ctx, "/label/__name__/values", nil, &names); err != nil {
+		return 0, err
+	}
+	return len(names), nil
+}
+
 var _ Source = (*RemoteSource)(nil)

@@ -157,4 +157,6 @@ type Source interface {
 	MetricDetail(ctx context.Context, metricName string) (MetricDetail, error)
 	// QueryRange runs a PromQL range query and returns the first series' samples.
 	QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]SamplePoint, error)
+	// UniqueMetricCount returns the number of distinct metric names.
+	UniqueMetricCount(ctx context.Context) (int, error)
 }

@@ -2,6 +2,7 @@
 <section class="card" id="cardinality-section">
   <div class="card-header">
     <h2>{{if .MetricSearch}}Metric names matching &quot;{{.MetricSearch}}&quot;{{else}}Top {{.Limit}} series count by metric name{{end}}</h2>
+    {{if .TotalMetrics}}<span class="hint" style="margin-left:auto">Total: <strong style="color:var(--text)">{{.TotalMetrics}}</strong> metrics</span>{{end}}
   </div>
   <form class="toolbar" method="get" action="/"
         hx-get="/partials/cardinality"

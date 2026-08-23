@@ -4,98 +4,142 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>prom-viewer</title>
+  <title>prom-viewer · Prometheus TSDB Inspector</title>
+  <script>try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)}catch(e){document.documentElement.setAttribute('data-theme','light')}</script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <span class="brand">prom-viewer</span>
-      <span class="topbar-meta">{{if .Build.Version}}{{.Build.Version}} &middot; {{end}}{{.Runtime.Hostname}}</span>
+      <div class="brand-wrap">
+        <div class="brand-logo">›_</div>
+        <div>
+          <div class="brand">prom-viewer</div>
+          <div class="brand-sub">TSDB &amp; Cardinality Inspector</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-meta">
+          {{if .Build.Version}}<span class="pill pill-version">v{{.Build.Version}}</span>{{end}}
+          {{if .Runtime.Hostname}}<span class="pill">{{.Runtime.Hostname}}</span>{{end}}
+          <span class="pill pill-live">Live</span>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀︎ Light</span><span class="icon-moon">☾ Dark</span></button>
+      </div>
     </div>
   </header>
 
   <main>
     {{if .Err}}
-    <p class="error banner">Error loading TSDB status: {{.Err}}</p>
+    <p class="error banner">⚠ Error loading TSDB status: {{.Err}}</p>
     {{end}}
 
     <div class="grid">
       <section class="card">
-        <div class="card-header"><h2>TSDB Head</h2></div>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon tsdb">◈</div>
+            <h2>TSDB Head</h2>
+          </div>
+        </div>
         <table>
           <tbody>
-            <tr><th>Number of Series</th><td class="num">{{.Head.NumSeries}}</td></tr>
-            <tr><th>Number of Chunks</th><td class="num">{{.Head.ChunkCount}}</td></tr>
-            <tr><th>Number of Label Pairs</th><td class="num">{{.Head.NumLabelPairs}}</td></tr>
-            <tr><th>Min Time</th><td>{{unixMillis .Head.MinTime}}</td></tr>
-            <tr><th>Max Time</th><td>{{unixMillis .Head.MaxTime}}</td></tr>
-            <tr><th>Persisted Blocks</th><td class="num">{{.BlockCount}}</td></tr>
+            <tr><th>Series</th><td class="num">{{.Head.NumSeries}}</td></tr>
+            <tr><th>Chunks</th><td class="num">{{.Head.ChunkCount}}</td></tr>
+            <tr><th>Label Pairs</th><td class="num">{{.Head.NumLabelPairs}}</td></tr>
+            <tr><th>Min Time</th><td class="num mono" style="text-align:left">{{unixMillis .Head.MinTime}}</td></tr>
+            <tr><th>Max Time</th><td class="num mono" style="text-align:left">{{unixMillis .Head.MaxTime}}</td></tr>
+            <tr><th>Blocks</th><td class="num">{{.BlockCount}}</td></tr>
           </tbody>
         </table>
       </section>
 
       <section class="card">
-        <div class="card-header"><h2>WAL</h2></div>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon wal">⬡</div>
+            <h2>WAL</h2>
+          </div>
+        </div>
         <table>
           <tbody>
             <tr><th>Size</th><td class="num">{{humanBytes .WALInfo.SizeBytes}}</td></tr>
-            <tr><th>Current Segment</th><td class="num">{{.WALInfo.CurrentSegment}}</td></tr>
+            <tr><th>Segment</th><td class="num">{{.WALInfo.CurrentSegment}}</td></tr>
           </tbody>
         </table>
         {{if .WALReplayInProgress}}
-        <p class="wal-replaying">In progress: segment {{.WALReplay.Current}} of {{.WALReplay.Max}} ({{.WALReplayPercent}}%)</p>
+        <p class="wal-replaying">Replaying segment {{.WALReplay.Current}} / {{.WALReplay.Max}} — {{.WALReplayPercent}}%</p>
         <progress class="wal-progress" value="{{.WALReplayPercent}}" max="100"></progress>
         {{else}}
-        <p class="badge-ok">&check; Up to date</p>
+        <p class="badge-ok">✓ Up to date</p>
         {{end}}
       </section>
 
       <section class="card">
-        <div class="card-header"><h2>Runtime</h2></div>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon runtime">⬢</div>
+            <h2>Runtime</h2>
+          </div>
+          <span class="hint">Go {{.Build.GoVersion}}</span>
+        </div>
         <table>
           <tbody>
-            <tr><th>Start Time</th><td>{{.Runtime.StartTime}}</td></tr>
-            <tr><th>Server Time</th><td>{{.Runtime.ServerTime}}</td></tr>
-            <tr><th>CWD</th><td>{{.Runtime.CWD}}</td></tr>
-            <tr><th>Reload Config Success</th><td>{{.Runtime.ReloadConfigSuccess}}</td></tr>
-            <tr><th>Last Config Time</th><td>{{.Runtime.LastConfigTime}}</td></tr>
-            <tr><th>Corruption Count</th><td class="num">{{.Runtime.CorruptionCount}}</td></tr>
+            <tr><th>Uptime</th><td class="num mono" style="text-align:left">{{.Runtime.StartTime}}</td></tr>
             <tr><th>Goroutines</th><td class="num">{{.Runtime.GoroutineCount}}</td></tr>
             <tr><th>GOMAXPROCS</th><td class="num">{{.Runtime.GOMAXPROCS}}</td></tr>
-            <tr><th>GOMEMLIMIT</th><td class="num">{{.Runtime.GOMEMLIMIT}}</td></tr>
-            <tr><th>GOGC</th><td>{{.Runtime.GOGC}}</td></tr>
-            <tr><th>Storage Retention</th><td>{{.Runtime.StorageRetention}}</td></tr>
+            <tr><th>GOGC</th><td class="num">{{.Runtime.GOGC}}</td></tr>
+            <tr><th>Retention</th><td class="num">{{.Runtime.StorageRetention}}</td></tr>
+            <tr><th>Corruption</th><td class="num">{{.Runtime.CorruptionCount}}</td></tr>
           </tbody>
         </table>
       </section>
     </div>
 
     <section class="card">
-      <div class="card-header"><h2>Resource Usage — Last 1h</h2><span class="hint">rate(process_cpu_seconds_total[2m]) &amp; process_resident_memory_bytes</span></div>
-      {{if .Resource.Err}}<p class="error">Error loading resource graphs: {{.Resource.Err}}</p>{{end}}
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-icon resource">≋</div>
+          <div>
+            <h2>Resource Usage</h2>
+            <div style="font-size:0.72rem;color:var(--text-faint);font-weight:500">Last 1 hour · live from Prometheus</div>
+          </div>
+        </div>
+      </div>
+      {{if .Resource.Err}}<p class="error banner">Error loading graphs: {{.Resource.Err}}</p>{{end}}
       <div class="resource-grid">
         <div class="resource-panel">
-          <div class="resource-title">CPU <span class="resource-current">{{if not .Resource.CPU.Empty}}{{humanCPU .Resource.CPU.Current}}{{else}}n/a{{end}}</span></div>
-          {{if .Resource.CPU.Empty}}<p class="empty-state">No CPU data (need &gt;2m uptime)</p>
+          <div class="resource-title">CPU <span class="resource-current">{{if not .Resource.CPU.Empty}}{{humanCPU .Resource.CPU.Current}}{{else}}—{{end}}</span></div>
+          {{if .Resource.CPU.Empty}}<p class="empty-state">No CPU data yet<br><span style="font-size:0.8em">needs &gt; 2m uptime</span></p>
           {{else}}
-          <svg viewBox="0 0 600 80" class="sparkline" preserveAspectRatio="none" role="img" aria-label="CPU last hour">
+          <svg viewBox="0 0 600 88" class="sparkline" preserveAspectRatio="none" role="img" aria-label="CPU last hour">
             <path d="{{.Resource.CPU.AreaPath}}" class="sparkline-area cpu-area"></path>
             <path d="{{.Resource.CPU.Path}}" class="sparkline-line cpu-line" fill="none"></path>
           </svg>
-          <div class="sparkline-meta"><span>{{printf "%.3f" .Resource.CPU.Min}} cores</span><span>1h</span><span>{{printf "%.3f" .Resource.CPU.Max}} cores</span></div>
+          <div class="sparkline-meta"><span>{{printf "%.3f" .Resource.CPU.Min}} cores</span><span>60 min</span><span>{{printf "%.3f" .Resource.CPU.Max}} cores</span></div>
           {{end}}
         </div>
         <div class="resource-panel">
-          <div class="resource-title">Memory (RSS) <span class="resource-current">{{if not .Resource.Mem.Empty}}{{humanBytesF .Resource.Mem.Current}}{{else}}n/a{{end}}</span></div>
+          <div class="resource-title">Memory RSS <span class="resource-current">{{if not .Resource.Mem.Empty}}{{humanBytesF .Resource.Mem.Current}}{{else}}—{{end}}</span></div>
           {{if .Resource.Mem.Empty}}<p class="empty-state">No memory data</p>
           {{else}}
-          <svg viewBox="0 0 600 80" class="sparkline" preserveAspectRatio="none" role="img" aria-label="Memory last hour">
+          <svg viewBox="0 0 600 88" class="sparkline" preserveAspectRatio="none" role="img" aria-label="Memory last hour">
             <path d="{{.Resource.Mem.AreaPath}}" class="sparkline-area mem-area"></path>
             <path d="{{.Resource.Mem.Path}}" class="sparkline-line mem-line" fill="none"></path>
           </svg>
-          <div class="sparkline-meta"><span>{{humanBytesF .Resource.Mem.Min}}</span><span>1h</span><span>{{humanBytesF .Resource.Mem.Max}}</span></div>
+          <div class="sparkline-meta"><span>{{humanBytesF .Resource.Mem.Min}}</span><span>60 min</span><span>{{humanBytesF .Resource.Mem.Max}}</span></div>
+          {{end}}
+        </div>
+        <div class="resource-panel">
+          <div class="resource-title">Series <span class="resource-current">{{if not .Resource.Series.Empty}}{{printf "%.0f" .Resource.Series.Current}}{{else}}—{{end}}</span></div>
+          {{if .Resource.Series.Empty}}<p class="empty-state">No series data</p>
+          {{else}}
+          <svg viewBox="0 0 600 88" class="sparkline" preserveAspectRatio="none" role="img" aria-label="Series last hour">
+            <path d="{{.Resource.Series.AreaPath}}" class="sparkline-area series-area"></path>
+            <path d="{{.Resource.Series.Path}}" class="sparkline-line series-line" fill="none"></path>
+          </svg>
+          <div class="sparkline-meta"><span>{{printf "%.0f" .Resource.Series.Min}}</span><span>60 min</span><span>{{printf "%.0f" .Resource.Series.Max}}</span></div>
           {{end}}
         </div>
       </div>
@@ -104,22 +148,38 @@
     {{template "cardinality.html" .}}
     {{template "metric_detail.html" .}}
 
-    <section class="card">
-      <details>
-        <summary>Flags ({{len .Flags}})</summary>
+    <section class="card card--plain">
+      <details open>
+        <summary>Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-faint)">({{len .Flags}} CLI flags)</span></summary>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Name</th><th>Value</th></tr></thead>
+            <thead><tr><th>Flag</th><th>Value</th></tr></thead>
             <tbody>
               {{range .Flags}}
-              <tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>
+              <tr><td>{{.Name}}</td><td class="mono">{{.Value}}</td></tr>
               {{end}}
             </tbody>
           </table>
         </div>
       </details>
     </section>
+
+    <div class="footer">
+      prom-viewer · read-only over <code>/api/v1</code> · <span class="mono">{{.Build.Version}} {{.Build.Revision}}</span> · no TSDB writes
+    </div>
   </main>
+  <script>
+  (function(){
+    var btn=document.getElementById('theme-toggle');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      var cur=document.documentElement.getAttribute('data-theme')||'light';
+      var nxt=cur==='dark'?'light':'dark';
+      document.documentElement.setAttribute('data-theme',nxt);
+      try{localStorage.setItem('theme',nxt)}catch(e){}
+    });
+  })();
+  </script>
 </body>
 </html>
 {{end}}

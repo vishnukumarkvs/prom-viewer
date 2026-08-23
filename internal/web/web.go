@@ -121,11 +121,12 @@ type overviewData struct {
 	metricDetailData
 }
 
-// ResourceData holds 1h CPU/memory graphs.
+// ResourceData holds 1h CPU/memory/series graphs.
 type ResourceData struct {
-	CPU GraphData
-	Mem GraphData
-	Err string
+	CPU    GraphData
+	Mem    GraphData
+	Series GraphData
+	Err    string
 }
 
 // GraphData is a single sparkline.
@@ -145,6 +146,7 @@ type cardinalityData struct {
 	Limit        int
 	MetricSearch string
 	Cardinality  source.Cardinality
+	TotalMetrics int
 }
 
 // metricDetailData backs the "cardinality of a metric" lookup section. It's
@@ -203,6 +205,11 @@ func (h *Handler) fetchCardinality(ctx context.Context, r *http.Request) cardina
 			v.SeriesCountByMetricName = filterStats(v.SeriesCountByMetricName, metricSearch, maxSearchResults)
 		}
 		data.Cardinality = v
+	}
+	if n, err := h.src.UniqueMetricCount(ctx); err != nil {
+		h.logger.Error("unique metric count", "err", err)
+	} else {
+		data.TotalMetrics = n
 	}
 	return data
 }
@@ -271,8 +278,8 @@ func buildGraph(points []source.SamplePoint) GraphData {
 			min = 0
 		}
 	}
-	const w, h = 600.0, 80.0
-	const pad = 2.0
+	const w, h = 600.0, 88.0
+	const pad = 4.0
 	n := len(points)
 	var sb strings.Builder
 	var area strings.Builder
@@ -307,6 +314,7 @@ func (h *Handler) fetchResource(ctx context.Context) ResourceData {
 	step := 30 * time.Second
 	cpuQ := "rate(process_cpu_seconds_total[2m])"
 	memQ := "process_resident_memory_bytes"
+	seriesQ := "prometheus_tsdb_head_series"
 	ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	cpu, err1 := h.src.QueryRange(ctx2, cpuQ, start, end, step)
@@ -319,7 +327,12 @@ func (h *Handler) fetchResource(ctx context.Context) ResourceData {
 		h.logger.Error("mem query_range", "err", err2)
 		return ResourceData{CPU: buildGraph(cpu), Err: err2.Error()}
 	}
-	return ResourceData{CPU: buildGraph(cpu), Mem: buildGraph(mem)}
+	series, err3 := h.src.QueryRange(ctx2, seriesQ, start, end, step)
+	if err3 != nil {
+		h.logger.Error("series query_range", "err", err3)
+		return ResourceData{CPU: buildGraph(cpu), Mem: buildGraph(mem), Err: err3.Error()}
+	}
+	return ResourceData{CPU: buildGraph(cpu), Mem: buildGraph(mem), Series: buildGraph(series)}
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
