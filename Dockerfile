@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 WORKDIR /src
+ARG TARGETOS
+ARG TARGETARCH
 ENV CGO_ENABLED=0
 COPY go.mod ./
 RUN go mod download
 COPY . .
-ARG TARGETOS
-ARG TARGETARCH
-RUN go build -trimpath -ldflags="-s -w" -o /out/prom-viewer ./cmd/prom-viewer
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/prom-viewer ./cmd/prom-viewer
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/prom-viewer /prom-viewer

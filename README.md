@@ -59,6 +59,12 @@ docker build -t prom-viewer .
 docker run -p 9099:9099 prom-viewer --prometheus.url=http://prometheus:9090
 ```
 
+Multi-arch image (`linux/amd64`, `linux/arm64`) is published as `vishnukumarkvs/prom-viewer:0.1.0` and `latest` — `docker pull` fetches only your platform (~4–5 MiB compressed; registry stores ~8–9 MiB total). Built with cross-compilation to avoid QEMU (`golang:1.25` segfault):
+
+```
+docker buildx build --platform linux/amd64,linux/arm64 -t vishnukumarkvs/prom-viewer:0.1.0 --push .
+```
+
 ## Running as a sidecar
 
 Since prom-viewer talks to Prometheus over `localhost`, it can run as a
