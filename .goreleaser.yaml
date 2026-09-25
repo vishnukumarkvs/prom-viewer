@@ -1,0 +1,109 @@
+# GoReleaser release configuration.
+#
+# Releases are tag-driven: pushing a `v*` tag makes
+# .github/workflows/release.yml run `goreleaser release`, which cross-compiles
+# both binaries, builds a multi-architecture image from `Dockerfile`, pushes it
+# to GHCR, and creates a GitHub Release with the archives and checksums.
+#
+# Validate locally before tagging:
+#
+#   goreleaser check
+#   goreleaser release --snapshot --clean
+#
+# `release --snapshot` builds the image for the host architecture only and
+# never pushes, so it is safe to run from a clean checkout.
+version: 2
+
+project_name: prom-viewer
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: prom-viewer
+    main: ./cmd/prom-viewer
+    binary: prom-viewer
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+  - id: promviewerctl
+    main: ./cmd/promviewerctl
+    binary: promviewerctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
+archives:
+  - id: prom-viewer
+    ids:
+      - prom-viewer
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: promviewerctl
+    ids:
+      - promviewerctl
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^ci:"
+      - "^docs:"
+      - "^test:"
+
+dockers_v2:
+  - id: prom-viewer
+    # Both binaries are copied into the image; see Dockerfile.
+    ids:
+      - prom-viewer
+      - promviewerctl
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/vishnukumarkvs/prom-viewer
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .IsNightly }}latest{{ end }}"
+    labels:
+      org.opencontainers.image.title: prom-viewer
+      org.opencontainers.image.description: Read-only web UI and CLI for inspecting a running Prometheus server
+      org.opencontainers.image.licenses: MIT
+    annotations:
+      org.opencontainers.image.source: https://github.com/vishnukumarkvs/prom-viewer
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    # SBOM generation needs an extra tool in the runner; skip it for now.
+    sbom: false
+
+release:
+  prerelease: auto

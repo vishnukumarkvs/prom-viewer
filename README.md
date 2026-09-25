@@ -54,21 +54,21 @@ go build -trimpath -o ./bin/promviewerctl ./cmd/promviewerctl
 
 ### Run with Docker
 
-Build locally:
+Build locally. The default `Dockerfile` is the GoReleaser release image and expects pre-built binaries, so use `Dockerfile.example` for a standalone build:
 
 ```sh
-docker build -t prom-viewer:local .
+docker build -f Dockerfile.example -t prom-viewer:local .
 docker run --rm -p 9099:9099 prom-viewer:local \
   --prometheus.url=http://host.docker.internal:9090
 ```
 
 On Linux, add `--add-host=host.docker.internal:host-gateway` when the Prometheus server is running on the host. If Prometheus is another container, put both containers on the same Docker network and use its service name instead.
 
-A multi-platform image is published under `vishnukumarkvs/prom-viewer` for `linux/amd64` and `linux/arm64`:
+A multi-platform image for `linux/amd64` and `linux/arm64` is published to GitHub Container Registry by the release workflow:
 
 ```sh
-docker pull vishnukumarkvs/prom-viewer:0.2.1
-docker run --rm -p 9099:9099 vishnukumarkvs/prom-viewer:0.2.1 \
+docker pull ghcr.io/vishnukumarkvs/prom-viewer:0.2.2
+docker run --rm -p 9099:9099 ghcr.io/vishnukumarkvs/prom-viewer:0.2.2 \
   --prometheus.url=http://prometheus:9090
 ```
 
@@ -90,7 +90,7 @@ When both processes share a pod network namespace, prom-viewer can use `localhos
 ```yaml
 containers:
   - name: prom-viewer
-    image: docker.io/vishnukumarkvs/prom-viewer:0.2.1
+    image: ghcr.io/vishnukumarkvs/prom-viewer:0.2.2
     args:
       - --prometheus.url=http://localhost:9090
       - --web.listen-address=:9099
@@ -280,6 +280,33 @@ The full-page and partial routes use the same optional query parameters:
 
 All templates and static assets are embedded at compile time. A change to a template, stylesheet, or static JavaScript file therefore requires rebuilding the binary or image.
 
+## Releases
+
+Releases are automated with [GoReleaser](https://goreleaser.com/). Pushing a `v*` tag runs `.github/workflows/release.yml`, which:
+
+- runs the test suite;
+- cross-compiles `prom-viewer` and `promviewerctl` for `linux/amd64` and `linux/arm64` with `CGO_ENABLED=0` and `-trimpath`;
+- builds a multi-architecture image from `Dockerfile` and pushes it to `ghcr.io/vishnukumarkvs/prom-viewer` as `<version>` (for example `0.2.2`) and `latest`;
+- creates a GitHub Release with the per-architecture archives and `checksums.txt`.
+
+The workflow authenticates to GHCR with the automatic `GITHUB_TOKEN`, so no registry secret is needed. A new package is created private, so make it public in the package settings once if the image should be pullable without credentials.
+
+There are two Dockerfiles on purpose:
+
+| File | Used by | Purpose |
+|---|---|---|
+| `Dockerfile` | GoReleaser | Copies the binaries GoReleaser has already cross-compiled. It cannot be built on its own. |
+| `Dockerfile.example` | `docker build -f Dockerfile.example` | Self-contained multi-stage build for local, offline, or non-GoReleaser builds. |
+
+To rehearse a release locally without contacting a registry:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean
+```
+
+A snapshot build compiles both binaries, builds a host-architecture image, and writes the artifacts to `dist/`.
+
 ## Development
 
 The repository includes focused tests for the Prometheus adapter and the CLI using `httptest` and in-memory vector results. Add or extend tests when changing parsing, request routing, or error handling.
@@ -320,7 +347,10 @@ internal/source/       Source interface, data types, Prometheus HTTP adapter
 internal/web/          HTTP handlers, request data, template funcs, and rendering
 internal/web/templates/ Server-rendered HTML templates
 internal/web/static/   CSS and vendored htmx
-Dockerfile             Multi-stage, multi-platform image build
+Dockerfile             GoReleaser release image; copies pre-built binaries
+Dockerfile.example     Self-contained multi-platform build for standalone use
+.goreleaser.yaml       Binary, archive, and container release pipeline
+.github/workflows/     Tag-driven release workflow
 ```
 
 ## Current limitations

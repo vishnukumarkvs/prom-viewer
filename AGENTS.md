@@ -27,7 +27,10 @@ internal/source/remote.go     Prometheus HTTP API adapter
 internal/web/web.go           Routes, request parsing, timeouts, and data assembly
 internal/web/templates/       Server-rendered HTML templates
 internal/web/static/          CSS and vendored htmx
-Dockerfile                    Multi-stage, multi-platform image build
+Dockerfile                    GoReleaser release image; copies pre-built binaries
+Dockerfile.example            Self-contained multi-platform build for standalone use
+.goreleaser.yaml              Binary, archive, and container release pipeline
+.github/workflows/release.yml Tag-driven release workflow
 ```
 
 The main dependency directions are:
@@ -141,8 +144,12 @@ go build ./...
 # Run against a local Prometheus
 go run ./cmd/prom-viewer --prometheus.url=http://localhost:9090
 
-# Build the container image
-docker build -t prom-viewer:local .
+# Build the container image without GoReleaser
+docker build -f Dockerfile.example -t prom-viewer:local .
+
+# Validate the release configuration and rehearse a release
+goreleaser check
+goreleaser release --snapshot --clean
 ```
 
 The CLI and source packages have focused unit tests using `httptest` and in-memory vectors; these tests do not require a live Prometheus. A change that affects parsing, request routing, template behavior, or source compatibility should extend those tests rather than relying only on compilation.
@@ -155,17 +162,24 @@ Useful test boundaries:
 - Test empty metric/rule data separately from upstream failures.
 - Run `gofmt`, `go vet ./...`, and `go test ./...` after implementation changes.
 
-## Docker guidance
+## Release and Docker guidance
 
-The `Dockerfile` is intentionally a two-stage, `CGO_ENABLED=0` build using the target platform variables. Preserve:
+Releases are tag-driven through GoReleaser. `.github/workflows/release.yml` runs `goreleaser release` when a `v*` tag is pushed. It authenticates to GHCR with the automatic `GITHUB_TOKEN`, so the workflow needs no registry secret. Preserve:
 
-- cross-compilation via `GOOS` and `GOARCH`;
-- `-trimpath` and reproducible/minimal build flags;
+- `CGO_ENABLED=0` and `-trimpath` in both `builds` entries;
 - the minimal non-root Alpine runtime image;
 - both `/prom-viewer` and `/promviewerctl` in the image;
-- the web binary as the default entry point and the CLI available via `--entrypoint`.
+- the web binary as the default entry point and the CLI available via `--entrypoint`;
+- the `linux/amd64` and `linux/arm64` platforms.
 
-If adding runtime files or dependencies, verify they exist in the Alpine runtime image and that the image still works for both `linux/amd64` and `linux/arm64`.
+The runtime stage runs `apk add`, so the arm64 image build needs QEMU. Keep the `docker/setup-qemu-action` step in the release workflow unless the runtime stage is made `RUN`-free.
+
+There are two Dockerfiles and the distinction is load-bearing:
+
+- `Dockerfile` is the GoReleaser image. It copies binaries that GoReleaser already cross-compiled from `$TARGETPLATFORM`, and cannot be built standalone. Do not add a builder stage or a compiler to it.
+- `Dockerfile.example` is the self-contained two-stage `CGO_ENABLED=0` build that cross-compiles via `GOOS`/`GOARCH`. It is what `docker build -f Dockerfile.example .` uses and what anyone building without GoReleaser should use.
+
+If you change runtime contents in `Dockerfile`, mirror the change in `Dockerfile.example` so both images stay equivalent. Verify with `goreleaser release --snapshot --clean`, and confirm the image still works for both `linux/amd64` and `linux/arm64`.
 
 ## Definition of done
 
@@ -175,6 +189,7 @@ Before handing off a change, verify that:
 - changed Go files are formatted;
 - `go vet ./...` and `go test ./...` pass, or any failure is explained;
 - the application builds with the Go version in `go.mod`;
+- `goreleaser check` passes, and `goreleaser release --snapshot --clean` succeeds if `Dockerfile`, `.goreleaser.yaml`, or the binaries changed;
 - embedded assets and partial routes were checked together;
 - no write path, secret, or unsafe template rendering was introduced;
 - documentation is updated for user-visible changes;
