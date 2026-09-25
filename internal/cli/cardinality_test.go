@@ -36,6 +36,62 @@ func TestBuildCardinalityQueryRejectsInvalidMatcher(t *testing.T) {
 	}
 }
 
+// Prometheus rejects a vector selector whose matchers all match the empty
+// string, so ".*" must fail locally rather than becoming an upstream 400.
+func TestBuildCardinalityQueryRejectsEmptyMatchingRegex(t *testing.T) {
+	for _, metricRegex := range []string{".*", "", "^$", ".{0,3}"} {
+		if _, err := buildCardinalityQuery(metricRegex, nil, nil); err == nil && metricRegex != "" {
+			t.Errorf("buildCardinalityQuery(%q) error = nil, want empty-matcher error", metricRegex)
+		}
+	}
+}
+
+func TestBuildCardinalityQueryAllowsNonEmptyRegex(t *testing.T) {
+	query, err := buildCardinalityQuery(".+", nil, []string{"actual_destination"})
+	if err != nil {
+		t.Fatalf("buildCardinalityQuery() error = %v", err)
+	}
+	want := `count by (actual_destination) ({ __name__=~".+" })`
+	if query.expression != want {
+		t.Errorf("expression = %q, want %q", query.expression, want)
+	}
+}
+
+// A label matcher that cannot match the empty string satisfies the Prometheus
+// rule on its own, so ".*" stays acceptable alongside it.
+func TestBuildCardinalityQueryEmptyRegexWithNonEmptyLabelMatcher(t *testing.T) {
+	query, err := buildCardinalityQuery(".*", []string{`job="api"`}, nil)
+	if err != nil {
+		t.Fatalf("buildCardinalityQuery() error = %v", err)
+	}
+	want := `count by (__name__) ({ __name__=~".*", job="api" })`
+	if query.expression != want {
+		t.Errorf("expression = %q, want %q", query.expression, want)
+	}
+}
+
+func TestMatchesEmptyLabel(t *testing.T) {
+	tests := []struct {
+		operator string
+		value    string
+		want     bool
+	}{
+		{"=", "api", false},
+		{"=", "", true},
+		{"!=", "api", true},
+		{"!=", "", false},
+		{"=~", ".+", false},
+		{"=~", ".*", true},
+		{"!~", ".+", true},
+		{"!~", ".*", false},
+	}
+	for _, test := range tests {
+		if got := matchesEmptyLabel(test.operator, test.value); got != test.want {
+			t.Errorf("matchesEmptyLabel(%q, %q) = %v, want %v", test.operator, test.value, got, test.want)
+		}
+	}
+}
+
 func TestMakeCardinalityResultSortsAndTotals(t *testing.T) {
 	query := cardinalityQuery{
 		expression: "count by (__name__) ({ __name__=~\".*\" })",

@@ -140,6 +140,12 @@ envoy_server_hot_restart      345
 
 The metric-name regex is a Prometheus/RE2 regular expression and is fully anchored by Prometheus, so use `^envoy_.*` when you want a prefix match.
 
+To count every metric, use `.+` rather than `.*`. Prometheus requires a vector selector to contain at least one matcher that cannot match the empty string, and `.*` matches empty, so it is rejected with `vector selector must contain at least one non-empty matcher`:
+
+```sh
+promviewerctl cardinality --metric-regex '.+' --group-by actual_destination
+```
+
 ### Count by an Envoy label value
 
 Repeat `--label-regex` for additional Prometheus matchers. The flag accepts `=`, `!=`, `=~`, and `!~` operators:

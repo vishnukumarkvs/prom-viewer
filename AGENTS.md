@@ -112,6 +112,7 @@ Supported query parameters are `limit`, `metric`, `detail_metric`, `rule_search`
 
 - The `cardinality` command is intentionally an instant-query helper, not an arbitrary PromQL shell.
 - `--metric-regex` matches `__name__`; `--label-regex` is repeatable and accepts `=`, `!=`, `=~`, and `!~` matchers; `--group-by` controls aggregation labels.
+- Prometheus requires a vector selector to have at least one matcher that cannot match the empty string, so `.*` is invalid as a sole matcher. `buildCardinalityQuery` enforces this locally via `matchesEmptyLabel` and points the user at `.+`. Keep that check in step with `buildCardinalityQuery`'s selector construction.
 - Escape user-provided metric names, regexes, and label values before building PromQL. Validate regexes and label names locally when possible.
 - Treat “active” as the result of a Prometheus instant query. Use `--time` only when a reproducible RFC3339 evaluation time is needed.
 - Keep table output human-readable and JSON output stable, sorted, and machine-friendly. Preserve the total and row-level count fields when extending the schema.

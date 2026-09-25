@@ -62,6 +62,9 @@ series in each result group. The query is evaluated at the current time unless
 		Example: `  # Count active series for every metric matching an Envoy-style prefix
   promviewerctl cardinality --metric-regex '^envoy_.*'
 
+  # Count active series for every metric, grouped by a label
+  promviewerctl cardinality --metric-regex '.+' --group-by actual_destination
+
   # Count matching series by an Envoy label value
   promviewerctl cardinality \
     --metric-regex '^envoy_.*' \
@@ -80,7 +83,7 @@ series in each result group. The query is evaluated at the current time unless
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.metricRegex, "metric-regex", "", "Required regex to match against the __name__ label.")
+	flags.StringVar(&opts.metricRegex, "metric-regex", "", "Required regex to match against the __name__ label. Use \".+\" to match every metric; \".*\" is rejected by Prometheus because it also matches the empty string.")
 	flags.StringArrayVar(&opts.labelMatchers, "label-regex", nil, "Optional Prometheus label matcher; repeat for multiple matchers (for example 'envoy_cluster_name=~\"foo.*\"').")
 	flags.StringSliceVar(&opts.groupBy, "group-by", nil, "Label to group by; repeat or comma-separate labels. Defaults to __name__.")
 	flags.StringVarP(&opts.format, "format", "o", "table", "Output format: table or json.")
@@ -130,7 +133,8 @@ func buildCardinalityQuery(metricRegex string, rawMatchers, rawGroupBy []string)
 	if metricRegex == "" {
 		return cardinalityQuery{}, fmt.Errorf("--metric-regex must not be empty")
 	}
-	if _, err := regexp.Compile(metricRegex); err != nil {
+	metricPattern, err := regexp.Compile(metricRegex)
+	if err != nil {
 		return cardinalityQuery{}, fmt.Errorf("invalid --metric-regex %q: %w", metricRegex, err)
 	}
 
@@ -139,6 +143,12 @@ func buildCardinalityQuery(metricRegex string, rawMatchers, rawGroupBy []string)
 		return cardinalityQuery{}, err
 	}
 
+	// Prometheus rejects a vector selector when every matcher also matches the
+	// empty string, so "{ __name__=~\".*\" }" is a parse error rather than a
+	// query for all metrics. Detect that here to report it as a flag mistake
+	// instead of an opaque upstream 400. See matchesEmptyLabel.
+	hasNonEmptyMatcher := !metricPattern.MatchString("")
+
 	selectors := make([]string, 0, len(rawMatchers)+1)
 	selectors = append(selectors, "__name__=~"+quotePromQLString(metricRegex))
 	for _, rawMatcher := range rawMatchers {
@@ -146,7 +156,14 @@ func buildCardinalityQuery(metricRegex string, rawMatchers, rawGroupBy []string)
 		if err != nil {
 			return cardinalityQuery{}, err
 		}
+		if !matchesEmptyLabel(operator, value) {
+			hasNonEmptyMatcher = true
+		}
 		selectors = append(selectors, name+operator+quotePromQLString(value))
+	}
+
+	if !hasNonEmptyMatcher {
+		return cardinalityQuery{}, fmt.Errorf("every matcher also matches the empty string, which Prometheus rejects: use %q instead of %q to match all metric names", ".+", metricRegex)
 	}
 
 	expression := fmt.Sprintf("count by (%s) ({ %s })", strings.Join(groupBy, ", "), strings.Join(selectors, ", "))
@@ -185,6 +202,29 @@ func normalizeGroupBy(raw []string) ([]string, error) {
 		return nil, fmt.Errorf("--group-by must contain at least one label")
 	}
 	return groupBy, nil
+}
+
+// matchesEmptyLabel reports whether a label matcher also matches a series in
+// which that label is absent or empty. Prometheus requires at least one matcher
+// in a vector selector that does not, which is why __name__=~".*" is invalid
+// while __name__=~".+" is not.
+func matchesEmptyLabel(operator, value string) bool {
+	switch operator {
+	case "=":
+		return value == ""
+	case "!=":
+		// A series without the label still satisfies "!=" against a non-empty
+		// value, because the absent label is treated as empty.
+		return value != ""
+	case "=~":
+		pattern, err := regexp.Compile(value)
+		return err == nil && pattern.MatchString("")
+	case "!~":
+		pattern, err := regexp.Compile(value)
+		return err == nil && !pattern.MatchString("")
+	default:
+		return true
+	}
 }
 
 func parseMatcher(raw string) (string, string, string, error) {
