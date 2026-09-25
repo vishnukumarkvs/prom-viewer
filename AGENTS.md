@@ -1,0 +1,164 @@
+# AGENTS.md
+
+This file contains repository-specific guidance for coding agents and contributors working in `prom-viewer`. It applies to the entire repository unless a more specific `AGENTS.md` is added in a subdirectory.
+
+## Project profile
+
+- **Purpose:** a small, read-only web UI for inspecting a running Prometheus server.
+- **Language:** Go 1.25 or newer.
+- **Module:** `github.com/kvsvishnukumar/prom-viewer`.
+- **Entry point:** `cmd/prom-viewer`.
+- **Data source:** Prometheus HTTP API through `internal/source.RemoteSource`.
+- **Web layer:** `net/http` handlers, `html/template`, htmx partials, and embedded CSS/JavaScript.
+- **Dependencies:** the project currently uses only the Go standard library. Keep the dependency footprint small unless a change has a clear justification.
+- **Deployment model:** a single static binary or a small non-root Docker image. There is no database or frontend build toolchain.
+
+Read `README.md` for the user-facing behavior, supported endpoints, configuration, and current limitations before making a change.
+
+## Repository layout
+
+```text
+cmd/prom-viewer/main.go       Process entry point, flags, logger, and server startup
+internal/source/source.go     Source interface and internal data types
+internal/source/remote.go     Prometheus HTTP API adapter
+internal/web/web.go           Routes, request parsing, timeouts, and data assembly
+internal/web/templates/       Server-rendered HTML templates
+internal/web/static/          CSS and vendored htmx
+Dockerfile                    Multi-stage, multi-platform image build
+```
+
+The main dependency direction is:
+
+```text
+cmd/prom-viewer -> internal/web -> internal/source
+```
+
+`internal/web` must not import Prometheus implementation packages or reach into a TSDB directory. Keep backend-specific HTTP details in `internal/source`.
+
+## Working agreements
+
+1. Keep changes focused. Do not rewrite unrelated code, generated/vendor content, or user changes found in the working tree.
+2. Read the surrounding code and templates before changing a contract or UI section.
+3. Prefer the existing standard-library patterns over introducing a framework.
+4. Update documentation when changing flags, environment variables, routes, Prometheus endpoints, or user-visible behavior.
+5. Do not commit, delete, or overwrite files merely to make a diff look cleaner. If a change requires a migration, call it out explicitly.
+
+## Go conventions
+
+- Run `gofmt` on every changed Go file.
+- Use clear, receiver-appropriate names and keep comments useful for exported Go identifiers.
+- Pass `context.Context` through source calls and preserve cancellation. Do not replace request contexts with `context.Background()` inside handlers or adapters.
+- Wrap upstream errors with enough context to identify the Prometheus request, while preserving the original error with `%w` when callers may need to inspect it.
+- Return typed data from the source layer; do not pass raw Prometheus JSON or HTTP response objects into templates.
+- Keep time conversions explicit. Prometheus timestamps are handled as Unix milliseconds or float seconds in different APIs; preserve UTC behavior used by the UI.
+- Keep maps and other user-visible data in a deterministic order. For example, CLI flags are sorted before rendering.
+- If a new method is added to `Source`, update every implementation, the compile-time interface assertion, callers, and focused tests. Currently `RemoteSource` is the only implementation.
+- Do not change the module path as incidental cleanup. The Git remote and `go.mod` module path currently differ; changing either is a repository-identity migration and requires coordinated import and documentation updates.
+
+## Source and API contracts
+
+The current remote backend deliberately has these properties:
+
+- `--prometheus.url` is the base server URL, not a URL ending in `/api/v1`. `RemoteSource` appends `/api/v1` itself, so avoid double prefixes.
+- Requests are `GET` requests and the application is read-only. Do not add mutating Prometheus operations or direct TSDB writes.
+- The standard Prometheus response envelope must be checked for both HTTP success and `status: "success"`.
+- Remote cardinality by arbitrary label names is not supported: Prometheus's remote `/status/tsdb` breakdown is treated as `__name__`-only. Preserve that limitation unless the API and UI contract are deliberately extended.
+- Metric names are passed into PromQL selectors. Escape PromQL string literals before interpolating them, and use `url.Values` for query parameters.
+- The source currently uses a 30-second `http.Client` timeout. Handler-level deadlines are intentionally shorter for overview and resource requests. Do not remove or weaken them without understanding the fan-out of upstream calls.
+- Resource graphs are fixed one-hour PromQL queries with a 30-second step and currently render the first returned series. Do not present them as arbitrary query support.
+- A source method returning an empty slice or zero value for “no data” should be kept distinct from a transport/API error where the interface documents that distinction.
+
+When adding a Prometheus API call:
+
+1. Prefer the existing `get` helper when the response is a standard JSON envelope.
+2. Handle non-200 responses, decode failures, and `status != "success"` distinctly enough for useful logs.
+3. Bound or deliberately document expensive requests such as metric-name enumeration.
+4. Add tests with `httptest.Server`; unit tests should not require a live Prometheus instance.
+
+## HTTP and web-layer contracts
+
+The current routes are:
+
+```text
+GET /                         Full overview page
+GET /static/                  Embedded CSS and JavaScript
+GET /partials/cardinality     Top metric names and metric search
+GET /partials/metric-detail   Exact metric cardinality and metadata
+GET /partials/rules           Recording-rule groups and filter
+GET /partials/rule-detail     Recording-rule group detail
+```
+
+Supported query parameters are `limit`, `metric`, `detail_metric`, `rule_search`, and `rule_group`. Preserve their meaning and URL behavior when changing handlers or templates.
+
+- Keep the full `GET /` fallback working when JavaScript is disabled.
+- htmx endpoints may render fragments, but the corresponding form must continue to target `/` for a normal navigation.
+- Keep `HX-Push-Url` behavior and bookmarkable query strings unless the UX is intentionally changing.
+- Set appropriate content types and use `http.Error` for handler-level failures.
+- Prefer small, testable fetch functions over embedding upstream API details directly in templates.
+- Preserve the existing per-request timeouts and per-section error isolation where practical. A failed optional section should not take down unrelated sections.
+- Do not add authentication assumptions silently. The current server has no auth, authorization, or TLS layer; any such feature needs explicit configuration, documentation, and security review.
+
+## Template and asset guidance
+
+- Use `html/template`, not `text/template`, for HTML output.
+- Keep all user-controlled values in template data and let `html/template` perform contextual escaping. Avoid `template.HTML` or hand-built markup for input-derived content.
+- Keep semantic HTML, keyboard-accessible controls, and the existing no-JavaScript behavior.
+- Keep the CSS and templates free of a Node/npm build step.
+- Treat `internal/web/static/htmx.min.js` as vendored third-party code. Do not hand-edit it as part of an application change; update it deliberately and retain its licensing/attribution requirements.
+- Template and static files are embedded with `go:embed`. Changes to them are not visible to a running binary until it is rebuilt.
+- When adding a partial, define the same template name and data shape expected by both the full-page template and the handler, then verify the fragment and no-JavaScript fallback.
+
+## Development and validation commands
+
+Use these commands from the repository root:
+
+```sh
+# Compile and run all package tests
+go test ./...
+
+# Run static analysis
+go vet ./...
+
+# Build without leaving a binary in the repository
+go build ./...
+
+# Run against a local Prometheus
+go run ./cmd/prom-viewer --prometheus.url=http://localhost:9090
+
+# Build the container image
+docker build -t prom-viewer:local .
+```
+
+There are currently no `*_test.go` files. A change that affects parsing, request routing, template behavior, or source compatibility should add focused tests rather than relying only on compilation.
+
+Useful test boundaries:
+
+- Use an `httptest.Server` to test `RemoteSource` response decoding, API errors, and malformed responses.
+- Use a fake `Source` implementation to test web handlers and query-parameter behavior without a Prometheus dependency.
+- Test template construction through `web.NewHandler` so template parse errors are caught.
+- Test empty metric/rule data separately from upstream failures.
+- Run `gofmt`, `go vet ./...`, and `go test ./...` after implementation changes.
+
+## Docker guidance
+
+The `Dockerfile` is intentionally a two-stage, `CGO_ENABLED=0` build using the target platform variables. Preserve:
+
+- cross-compilation via `GOOS` and `GOARCH`;
+- `-trimpath` and reproducible/minimal build flags;
+- the distroless non-root runtime image;
+- the single binary entry point and exposed port.
+
+If adding runtime files or dependencies, verify they exist in the distroless image and that the image still works for both `linux/amd64` and `linux/arm64`.
+
+## Definition of done
+
+Before handing off a change, verify that:
+
+- the behavior matches the README and the relevant template/source contracts;
+- changed Go files are formatted;
+- `go vet ./...` and `go test ./...` pass, or any failure is explained;
+- the application builds with the Go version in `go.mod`;
+- embedded assets and partial routes were checked together;
+- no write path, secret, or unsafe template rendering was introduced;
+- documentation is updated for user-visible changes;
+- unrelated files and the user's existing work remain untouched.
