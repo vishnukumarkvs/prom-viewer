@@ -127,6 +127,13 @@ type SamplePoint struct {
 	Value     float64
 }
 
+// VectorSample is a single result from a Prometheus instant vector query.
+type VectorSample struct {
+	Metric    map[string]string
+	Value     float64
+	Timestamp time.Time
+}
+
 // RecordingRule is a single recording rule within a group.
 type RecordingRule struct {
 	Name           string
@@ -139,13 +146,13 @@ type RecordingRule struct {
 
 // RuleGroup is a Prometheus rule group, filtered to recording rules for UI.
 type RuleGroup struct {
-	Name            string
-	File            string
-	Interval        float64
-	EvaluationTime  float64
-	LastEvaluation  time.Time
-	RecordingRules  []RecordingRule
-	TotalRules      int // all rules in group (for reference)
+	Name           string
+	File           string
+	Interval       float64
+	EvaluationTime float64
+	LastEvaluation time.Time
+	RecordingRules []RecordingRule
+	TotalRules     int // all rules in group (for reference)
 }
 
 // Source is implemented by each backend (remote HTTP API, local TSDB read)

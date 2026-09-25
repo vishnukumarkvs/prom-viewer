@@ -371,11 +371,14 @@ func (s *RemoteSource) instantQueryScalar(ctx context.Context, query string) (va
 	return f, true, nil
 }
 
-// escapePromQLString escapes a string for embedding inside a double-quoted
+// EscapePromQLString escapes a string for embedding inside a double-quoted
 // PromQL string literal, e.g. {__name__="<escaped>"}.
-func escapePromQLString(s string) string {
+func EscapePromQLString(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	return strings.ReplaceAll(s, "\t", `\t`)
 }
 
 // MetricDetail implements Source. It costs one instant query (series count),
@@ -384,7 +387,7 @@ func escapePromQLString(s string) string {
 // only run on-demand for a single metric, not on every page load.
 func (s *RemoteSource) MetricDetail(ctx context.Context, metricName string) (MetricDetail, error) {
 	detail := MetricDetail{Name: metricName}
-	selector := fmt.Sprintf("{__name__=%q}", escapePromQLString(metricName))
+	selector := fmt.Sprintf("{__name__=\"%s\"}", EscapePromQLString(metricName))
 
 	if v, ok, err := s.instantQueryScalar(ctx, "count("+selector+")"); err != nil {
 		return MetricDetail{}, err
@@ -471,6 +474,63 @@ func (s *RemoteSource) QueryRange(ctx context.Context, query string, start, end 
 	return out, nil
 }
 
+// Query executes an instant PromQL query against the current Prometheus time.
+func (s *RemoteSource) Query(ctx context.Context, query string) ([]VectorSample, error) {
+	return s.QueryAt(ctx, query, time.Time{})
+}
+
+// QueryAt executes an instant PromQL query at at. A zero time uses the
+// Prometheus server's current evaluation time.
+func (s *RemoteSource) QueryAt(ctx context.Context, query string, at time.Time) ([]VectorSample, error) {
+	q := url.Values{"query": {query}}
+	if !at.IsZero() {
+		q.Set("time", at.Format(time.RFC3339Nano))
+	}
+
+	var resp struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Value  []json.RawMessage `json:"value"`
+		} `json:"result"`
+	}
+	if err := s.get(ctx, "/query", q, &resp); err != nil {
+		return nil, err
+	}
+	if resp.ResultType != "vector" {
+		return nil, fmt.Errorf("query returned result type %q, want vector", resp.ResultType)
+	}
+
+	out := make([]VectorSample, 0, len(resp.Result))
+	for i, result := range resp.Result {
+		if len(result.Value) != 2 {
+			return nil, fmt.Errorf("query result %d has %d value fields, want 2", i, len(result.Value))
+		}
+
+		var timestamp float64
+		if err := json.Unmarshal(result.Value[0], &timestamp); err != nil {
+			return nil, fmt.Errorf("decoding query result %d timestamp: %w", i, err)
+		}
+		var rawValue string
+		if err := json.Unmarshal(result.Value[1], &rawValue); err != nil {
+			return nil, fmt.Errorf("decoding query result %d value: %w", i, err)
+		}
+		value, err := strconv.ParseFloat(rawValue, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing query result %d value %q: %w", i, rawValue, err)
+		}
+
+		sec := int64(timestamp)
+		nsec := int64((timestamp - float64(sec)) * 1e9)
+		out = append(out, VectorSample{
+			Metric:    result.Metric,
+			Value:     value,
+			Timestamp: time.Unix(sec, nsec).UTC(),
+		})
+	}
+	return out, nil
+}
+
 // UniqueMetricCount implements Source.
 func (s *RemoteSource) UniqueMetricCount(ctx context.Context) (int, error) {
 	var names []string
@@ -484,12 +544,12 @@ func (s *RemoteSource) UniqueMetricCount(ctx context.Context) (int, error) {
 func (s *RemoteSource) RuleGroups(ctx context.Context) ([]RuleGroup, error) {
 	var resp struct {
 		Groups []struct {
-			Name           string  `json:"name"`
-			File           string  `json:"file"`
-			Interval       float64 `json:"interval"`
-			EvaluationTime float64 `json:"evaluationTime"`
+			Name           string    `json:"name"`
+			File           string    `json:"file"`
+			Interval       float64   `json:"interval"`
+			EvaluationTime float64   `json:"evaluationTime"`
 			LastEvaluation time.Time `json:"lastEvaluation"`
-			Rules []struct {
+			Rules          []struct {
 				Name           string            `json:"name"`
 				Query          string            `json:"query"`
 				Expr           string            `json:"expr"`

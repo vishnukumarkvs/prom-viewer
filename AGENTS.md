@@ -4,21 +4,24 @@ This file contains repository-specific guidance for coding agents and contributo
 
 ## Project profile
 
-- **Purpose:** a small, read-only web UI for inspecting a running Prometheus server.
+- **Purpose:** a small, read-only web UI and companion CLI for inspecting a running Prometheus server.
 - **Language:** Go 1.25 or newer.
 - **Module:** `github.com/kvsvishnukumar/prom-viewer`.
-- **Entry point:** `cmd/prom-viewer`.
+- **Entry points:** `cmd/prom-viewer` for the web process and `cmd/promviewerctl` for the CLI.
 - **Data source:** Prometheus HTTP API through `internal/source.RemoteSource`.
 - **Web layer:** `net/http` handlers, `html/template`, htmx partials, and embedded CSS/JavaScript.
-- **Dependencies:** the project currently uses only the Go standard library. Keep the dependency footprint small unless a change has a clear justification.
-- **Deployment model:** a single static binary or a small non-root Docker image. There is no database or frontend build toolchain.
+- **CLI layer:** Cobra command tree, PromQL cardinality query construction, and table/JSON output.
+- **Dependencies:** the server uses the Go standard library; the CLI uses Cobra. Keep the dependency footprint small unless a change has a clear justification.
+- **Deployment model:** static web/CLI binaries or a small non-root Docker image. There is no database or frontend build toolchain.
 
 Read `README.md` for the user-facing behavior, supported endpoints, configuration, and current limitations before making a change.
 
 ## Repository layout
 
 ```text
-cmd/prom-viewer/main.go       Process entry point, flags, logger, and server startup
+cmd/prom-viewer/main.go       Web process entry point, flags, logger, and server startup
+cmd/promviewerctl/main.go     CLI process entry point
+internal/cli/                 Cobra commands, query construction, parsing, and output
 internal/source/source.go     Source interface and internal data types
 internal/source/remote.go     Prometheus HTTP API adapter
 internal/web/web.go           Routes, request parsing, timeouts, and data assembly
@@ -27,10 +30,11 @@ internal/web/static/          CSS and vendored htmx
 Dockerfile                    Multi-stage, multi-platform image build
 ```
 
-The main dependency direction is:
+The main dependency directions are:
 
 ```text
-cmd/prom-viewer -> internal/web -> internal/source
+cmd/prom-viewer  -> internal/web    -> internal/source
+cmd/promviewerctl -> internal/cli   -> internal/source
 ```
 
 `internal/web` must not import Prometheus implementation packages or reach into a TSDB directory. Keep backend-specific HTTP details in `internal/source`.
@@ -39,7 +43,7 @@ cmd/prom-viewer -> internal/web -> internal/source
 
 1. Keep changes focused. Do not rewrite unrelated code, generated/vendor content, or user changes found in the working tree.
 2. Read the surrounding code and templates before changing a contract or UI section.
-3. Prefer the existing standard-library patterns over introducing a framework.
+3. Prefer the existing standard-library patterns over introducing a framework; the CLI's Cobra dependency is an explicit exception for command parsing.
 4. Update documentation when changing flags, environment variables, routes, Prometheus endpoints, or user-visible behavior.
 5. Do not commit, delete, or overwrite files merely to make a diff look cleaner. If a change requires a migration, call it out explicitly.
 
@@ -62,10 +66,11 @@ The current remote backend deliberately has these properties:
 - `--prometheus.url` is the base server URL, not a URL ending in `/api/v1`. `RemoteSource` appends `/api/v1` itself, so avoid double prefixes.
 - Requests are `GET` requests and the application is read-only. Do not add mutating Prometheus operations or direct TSDB writes.
 - The standard Prometheus response envelope must be checked for both HTTP success and `status: "success"`.
-- Remote cardinality by arbitrary label names is not supported: Prometheus's remote `/status/tsdb` breakdown is treated as `__name__`-only. Preserve that limitation unless the API and UI contract are deliberately extended.
+- The web UI's remote cardinality breakdown by arbitrary label names is not supported: Prometheus's remote `/status/tsdb` breakdown is treated as `__name__`-only. The CLI's PromQL-based grouping is a separate capability; preserve the web limitation unless the API and UI contract are deliberately extended.
 - Metric names are passed into PromQL selectors. Escape PromQL string literals before interpolating them, and use `url.Values` for query parameters.
 - The source currently uses a 30-second `http.Client` timeout. Handler-level deadlines are intentionally shorter for overview and resource requests. Do not remove or weaken them without understanding the fan-out of upstream calls.
 - Resource graphs are fixed one-hour PromQL queries with a 30-second step and currently render the first returned series. Do not present them as arbitrary query support.
+- `RemoteSource.Query` and `QueryAt` execute instant queries and return typed vector samples. The CLI's `cardinality` command uses `count by (...)`; keep its “active” semantics tied to the instant-query evaluation time.
 - A source method returning an empty slice or zero value for “no data” should be kept distinct from a transport/API error where the interface documents that distinction.
 
 When adding a Prometheus API call:
@@ -98,6 +103,17 @@ Supported query parameters are `limit`, `metric`, `detail_metric`, `rule_search`
 - Preserve the existing per-request timeouts and per-section error isolation where practical. A failed optional section should not take down unrelated sections.
 - Do not add authentication assumptions silently. The current server has no auth, authorization, or TLS layer; any such feature needs explicit configuration, documentation, and security review.
 
+## CLI conventions
+
+`cmd/promviewerctl` is a separate binary built with Cobra. Keep the entry point thin and put command behavior in `internal/cli` so it can be tested without a live Prometheus.
+
+- The `cardinality` command is intentionally an instant-query helper, not an arbitrary PromQL shell.
+- `--metric-regex` matches `__name__`; `--label-regex` is repeatable and accepts `=`, `!=`, `=~`, and `!~` matchers; `--group-by` controls aggregation labels.
+- Escape user-provided metric names, regexes, and label values before building PromQL. Validate regexes and label names locally when possible.
+- Treat “active” as the result of a Prometheus instant query. Use `--time` only when a reproducible RFC3339 evaluation time is needed.
+- Keep table output human-readable and JSON output stable, sorted, and machine-friendly. Preserve the total and row-level count fields when extending the schema.
+- Keep runtime errors on stderr and successful output on stdout. Do not print progress or debug text to stdout because JSON must remain pipeable.
+
 ## Template and asset guidance
 
 - Use `html/template`, not `text/template`, for HTML output.
@@ -129,7 +145,7 @@ go run ./cmd/prom-viewer --prometheus.url=http://localhost:9090
 docker build -t prom-viewer:local .
 ```
 
-There are currently no `*_test.go` files. A change that affects parsing, request routing, template behavior, or source compatibility should add focused tests rather than relying only on compilation.
+The CLI and source packages have focused unit tests using `httptest` and in-memory vectors; these tests do not require a live Prometheus. A change that affects parsing, request routing, template behavior, or source compatibility should extend those tests rather than relying only on compilation.
 
 Useful test boundaries:
 
@@ -146,7 +162,8 @@ The `Dockerfile` is intentionally a two-stage, `CGO_ENABLED=0` build using the t
 - cross-compilation via `GOOS` and `GOARCH`;
 - `-trimpath` and reproducible/minimal build flags;
 - the distroless non-root runtime image;
-- the single binary entry point and exposed port.
+- both `/prom-viewer` and `/promviewerctl` in the image;
+- the web binary as the default entry point and the CLI available via `--entrypoint`.
 
 If adding runtime files or dependencies, verify they exist in the distroless image and that the image still works for both `linux/amd64` and `linux/arm64`.
 
