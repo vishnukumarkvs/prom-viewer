@@ -11,9 +11,12 @@ COPY . .
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/prom-viewer ./cmd/prom-viewer
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/promviewerctl ./cmd/promviewerctl
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/prom-viewer /prom-viewer
-COPY --from=build /out/promviewerctl /promviewerctl
-USER nonroot:nonroot
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 10001 promviewer \
+    && adduser -S -D -H -u 10001 -G promviewer promviewer
+COPY --from=build --chown=promviewer:promviewer /out/prom-viewer /prom-viewer
+COPY --from=build --chown=promviewer:promviewer /out/promviewerctl /promviewerctl
+USER promviewer
 EXPOSE 9099
 ENTRYPOINT ["/prom-viewer"]

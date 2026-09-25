@@ -67,12 +67,12 @@ On Linux, add `--add-host=host.docker.internal:host-gateway` when the Prometheus
 A multi-platform image is published under `vishnukumarkvs/prom-viewer` for `linux/amd64` and `linux/arm64`:
 
 ```sh
-docker pull vishnukumarkvs/prom-viewer:0.2.0
-docker run --rm -p 9099:9099 vishnukumarkvs/prom-viewer:0.2.0 \
+docker pull vishnukumarkvs/prom-viewer:0.2.1
+docker run --rm -p 9099:9099 vishnukumarkvs/prom-viewer:0.2.1 \
   --prometheus.url=http://prometheus:9090
 ```
 
-The image uses a non-root distroless runtime and has no shell. An image built from this checkout contains both `/prom-viewer` (the default entry point) and `/promviewerctl`. Pass application configuration as container arguments or environment variables as described below.
+The image uses a minimal Alpine runtime and runs as a non-root user. It includes BusyBox `/bin/sh` for diagnostics, but does not include `bash`. An image built from this checkout contains both `/prom-viewer` (the default entry point) and `/promviewerctl`. Pass application configuration as container arguments or environment variables as described below.
 
 Run the CLI from a locally built image by overriding the entry point:
 
@@ -90,7 +90,7 @@ When both processes share a pod network namespace, prom-viewer can use `localhos
 ```yaml
 containers:
   - name: prom-viewer
-    image: docker.io/vishnukumarkvs/prom-viewer:0.2.0
+    image: docker.io/vishnukumarkvs/prom-viewer:0.2.1
     args:
       - --prometheus.url=http://localhost:9090
       - --web.listen-address=:9099

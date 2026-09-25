@@ -161,11 +161,11 @@ The `Dockerfile` is intentionally a two-stage, `CGO_ENABLED=0` build using the t
 
 - cross-compilation via `GOOS` and `GOARCH`;
 - `-trimpath` and reproducible/minimal build flags;
-- the distroless non-root runtime image;
+- the minimal non-root Alpine runtime image;
 - both `/prom-viewer` and `/promviewerctl` in the image;
 - the web binary as the default entry point and the CLI available via `--entrypoint`.
 
-If adding runtime files or dependencies, verify they exist in the distroless image and that the image still works for both `linux/amd64` and `linux/arm64`.
+If adding runtime files or dependencies, verify they exist in the Alpine runtime image and that the image still works for both `linux/amd64` and `linux/arm64`.
 
 ## Definition of done
 
